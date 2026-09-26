@@ -1,20 +1,51 @@
-from google.cloud import vision
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+
+# Load API key from .env
+
+env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(env_path)
+
+api_key = os.getenv("GEMINI_API_KEY")
+
+if not api_key:
+    raise ValueError("GEMINI_API_KEY not found in .env")
+
+# Create Gemini client
+client = genai.Client(api_key=api_key)
 
 
 def extract_text(image_path):
-    client = vision.ImageAnnotatorClient()
+    """
+    Extract text from a discharge-summary image using Gemini.
+    """
 
     with open(image_path, "rb") as image_file:
-        content = image_file.read()
+        image_bytes = image_file.read()
 
-    image = vision.Image(content=content)
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=[
+            types.Part.from_bytes(
+                data=image_bytes,
+                mime_type="image/png"
+            ),
+            """
+            Extract all visible text from this medical discharge summary.
 
-    response = client.text_detection(image=image)
+            Important rules:
+            - Preserve medicine names exactly.
+            - Preserve dosage, frequency and duration.
+            - Preserve dates and follow-up instructions.
+            - Preserve food/diet instructions.
+            - Do NOT guess unclear text.
+            - Do NOT invent missing information.
+            - Return ONLY the extracted text.
+            """
+        ]
+    )
 
-    if response.error.message:
-        raise Exception(response.error.message)
-
-    if not response.text_annotations:
-        return ""
-
-    return response.text_annotations[0].description
+    return response.text or ""
