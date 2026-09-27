@@ -27,7 +27,7 @@ def extract_text(image_path):
         image_bytes = image_file.read()
 
     response = client.models.generate_content(
-        model="gemini-3.8-flash",
+        model="gemini-3.6-flash",
         contents=[
             types.Part.from_bytes(
                 data=image_bytes,

@@ -12,3 +12,6 @@ __pycache__/
 
 # Uploaded files
 /backend/uploads/
+
+# Generated audio
+/audio_output/

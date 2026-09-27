@@ -2,6 +2,7 @@
 import os
 import json
 import re
+from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
@@ -12,7 +13,8 @@ from gtts import gTTS
 # LOAD API KEY
 # ============================================================
 
-load_dotenv()
+env_path = Path(__file__).resolve().parent.parent / "backend" / ".env"
+load_dotenv(env_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -39,7 +41,8 @@ def extract_patient_name(text):
 
     patterns = [
         r"(?im)^\s*Patient\s+Name\s*[:#-]\s*(.+?)\s*$",
-        r"(?im)^\s*Name\s+of\s+Patient\s*[:#-]\s*(.+?)\s*$"
+        r"(?im)^\s*Name\s+of\s+Patient\s*[:#-]\s*(.+?)\s*$",
+        r"(?im)^\s*Name\s*[:#-]\s*(.+?)\s*$"
     ]
 
     for pattern in patterns:
@@ -928,6 +931,23 @@ def safety_check(result, raw_text, language):
             )
         ).lower().strip()
 
+        # Critical medicine information must be present
+        if not name or not dosage or not frequency or not duration:
+            medicine["status"] = "unclear"
+            medicine["confidence"] = "low"
+
+            set_safe_refusal(
+                result,
+                language,
+                "Medication information is incomplete or unclear. Please contact the hospital to confirm it."
+            )
+
+            result["safety_status"] = "REFUSED"
+            result["refusal"] = True
+
+
+            continue
+
         # ----------------------------------------------------
         # AI explicitly marked the medicine unclear
         # ----------------------------------------------------
@@ -1043,9 +1063,20 @@ def safety_check(result, raw_text, language):
         medicine["confidence"] = "high"
 
     # --------------------------------------------------------
-    # All medicines passed the safety checks
-    # --------------------------------------------------------
+# Final safety validation
+# --------------------------------------------------------
 
+# If any medicine is unclear, the complete plan must be refused.
+    if any(
+        str(medicine.get("status", "")).lower().strip() == "unclear"
+        for medicine in medicines
+    ):
+        result["safety_status"] = "REFUSED"
+        result["refusal"] = True
+
+        return result
+
+    # All medicines passed the safety checks
     result["safety_status"] = "CLEAR"
     result["refusal"] = False
 
@@ -1699,127 +1730,161 @@ def build_frontend_json(
 # MAIN PROGRAM
 # ============================================================
 
-print("\nChoose patient language:")
+# print("\nChoose patient language:")
 
-print("1. English")
-print("2. Tamil")
+# print("1. English")
+# print("2. Tamil")
 
-language_choice = input(
-    "\nEnter 1 or 2: "
-).strip()
+# language_choice = input(
+#     "\nEnter 1 or 2: "
+# ).strip()
 
-if language_choice == "2":
-    language = "Tamil"
-else:
-    language = "English"
-
-
-raw_text = input(
-    "\nPaste discharge summary text:\n"
-)
+# if language_choice == "2":
+#     language = "Tamil"
+# else:
+#     language = "English"
 
 
-# ============================================================
-# EXTRACT PATIENT NAME LOCALLY
-# ============================================================
-
-patient_name = extract_patient_name(
-    raw_text
-)
+# raw_text = input(
+#     "\nPaste discharge summary text:\n"
+# )
 
 
-# ============================================================
-# AI PROCESSING
-# ============================================================
+# # ============================================================
+# # EXTRACT PATIENT NAME LOCALLY
+# # ============================================================
 
-result = extract_discharge_info(
-    raw_text,
-    language
-)
-
-result = safety_check(
-    result,
-    raw_text,
-    language
-)
-
-result = create_daily_schedule(
-    result
-)
-
-result = add_patient_friendly_content(
-    result,
-    language
-)
-
-result = generate_audio(
-    result,
-    language
-)
+# patient_name = extract_patient_name(
+#     raw_text
+# )
 
 
-# ============================================================
-# BUILD FRONTEND JSON
-# ============================================================
+# # ============================================================
+# # AI PROCESSING
+# # ============================================================
 
-frontend_result = build_frontend_json(
-    result,
-    patient_name,
-    language
-)
+# result = extract_discharge_info(
+#     raw_text,
+#     language
+# )
+
+# result = safety_check(
+#     result,
+#     raw_text,
+#     language
+# )
+
+# result = create_daily_schedule(
+#     result
+# )
+
+# result = add_patient_friendly_content(
+#     result,
+#     language
+# )
+
+# result = generate_audio(
+#     result,
+#     language
+# )
 
 
-# ============================================================
-# DISPLAY RESULT
-# ============================================================
+# # ============================================================
+# # BUILD FRONTEND JSON
+# # ============================================================
 
-print("\nSELECTED LANGUAGE:")
-print(language)
+# frontend_result = build_frontend_json(
+#     result,
+#     patient_name,
+#     language
+# )
 
-print("\nFRONTEND JSON:")
 
-print(
-    json.dumps(
-        frontend_result,
-        indent=2,
-        ensure_ascii=False
+# # ============================================================
+# # DISPLAY RESULT
+# # ============================================================
+
+# print("\nSELECTED LANGUAGE:")
+# print(language)
+
+# print("\nFRONTEND JSON:")
+
+# print(
+#     json.dumps(
+#         frontend_result,
+#         indent=2,
+#         ensure_ascii=False
+#     )
+# )
+
+
+# # ============================================================
+# # STATUS
+# # ============================================================
+
+# if frontend_result["verification"]["refusal"] is True:
+
+#     print("\n⚠️ SAFE REFUSAL:")
+
+#     print(
+#         frontend_result["verification"].get(
+#             "refusal_message",
+#             "Please confirm the medication information with the hospital."
+#         )
+#     )
+
+# elif result.get(
+#     "audio_status"
+# ) == "SUCCESS":
+
+#     print("\n🔊 AUDIO CREATED:")
+
+#     print(
+#         result["audio_file"]
+#     )
+
+# else:
+
+#     print("\n🔊 AUDIO STATUS:")
+
+#     print(
+#         result.get(
+#             "audio_status",
+#             "NOT_CREATED"
+#         )
+#     )
+
+def generate_patient_plan(raw_text, language="English"):
+    """
+    Complete AI pipeline:
+    OCR text → AI extraction → safety check → schedule
+    → patient-friendly content → audio → frontend JSON
+    """
+
+    # Extract patient name locally
+    patient_name = extract_patient_name(raw_text)
+
+    # AI extraction
+    result = extract_discharge_info(raw_text, language)
+
+    # Safety validation
+    result = safety_check(result, raw_text, language)
+
+    # Create medicine schedule
+    result = create_daily_schedule(result)
+
+    # Add patient-friendly English/Tamil content
+    result = add_patient_friendly_content(result, language)
+
+    # Generate audio
+    result = generate_audio(result, language)
+
+    # Build final JSON for frontend
+    final_output = build_frontend_json(
+        result,
+        patient_name,
+        language
     )
-)
 
-
-# ============================================================
-# STATUS
-# ============================================================
-
-if frontend_result["verification"]["refusal"] is True:
-
-    print("\n⚠️ SAFE REFUSAL:")
-
-    print(
-        frontend_result["verification"].get(
-            "refusal_message",
-            "Please confirm the medication information with the hospital."
-        )
-    )
-
-elif result.get(
-    "audio_status"
-) == "SUCCESS":
-
-    print("\n🔊 AUDIO CREATED:")
-
-    print(
-        result["audio_file"]
-    )
-
-else:
-
-    print("\n🔊 AUDIO STATUS:")
-
-    print(
-        result.get(
-            "audio_status",
-            "NOT_CREATED"
-        )
-    )
+    return final_output
 
